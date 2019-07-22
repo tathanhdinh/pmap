@@ -1,0 +1,18 @@
+[package]
+name = "pmap"
+version = "0.1.0"
+authors = ["Ta Thanh Dinh <tathanhdinh@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+paw = "*"
+structopt = { version = "*", features = ["paw"] }
+once_cell = "*"
+rayon = "*"
+num-traits = "*"
+num-derive = "*"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winapi = { version = "*", features = [ "winuser", "libloaderapi", "commctrl", "processthreadsapi", "tlhelp32", "handleapi", "psapi", "errhandlingapi", "winbase", "shellapi", "memoryapi", "wow64apiset", "sysinfoapi", "synchapi", "winerror", "securitybaseapi"]}
