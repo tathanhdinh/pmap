@@ -1,21 +1,22 @@
-use std::mem::{self, MaybeUninit};
+use std::{
+    marker::PhantomData,
+    mem::{self, MaybeUninit},
+};
 
 use winapi::{
-    shared::{
-        minwindef::{DWORD, FALSE, HINSTANCE, HMODULE, MAX_PATH, TRUE},
-        ntdef::NULL,
-    },
+    shared::minwindef::{DWORD, FALSE, HMODULE, MAX_PATH, TRUE},
     um::{
-        processthreadsapi::{OpenProcess, OpenProcessToken},
+        handleapi::INVALID_HANDLE_VALUE,
+        processthreadsapi::OpenProcess,
         psapi::{
             EnumProcessModulesEx, GetModuleBaseNameW, GetModuleFileNameExW, GetModuleInformation,
             GetProcessImageFileNameW, LIST_MODULES_ALL, MODULEINFO,
         },
-        securitybaseapi::GetTokenInformation,
-        winnt::{
-            TokenUser, PROCESS_QUERY_INFORMATION, PROCESS_VM_OPERATION, PROCESS_VM_READ,
-            TOKEN_QUERY, TOKEN_USER,
+        tlhelp32::{
+            CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+            TH32CS_SNAPPROCESS,
         },
+        winnt::{HANDLE, PROCESS_QUERY_INFORMATION, PROCESS_VM_OPERATION, PROCESS_VM_READ},
     },
 };
 
@@ -46,7 +47,6 @@ impl Process {
             GetProcessImageFileNameW(hdl.into(), img_name.as_mut_ptr() as _, MAX_PATH as _)
         };
         if img_name_len == 0 {
-            // return Err(WindowsApiError::last());
             return last_error!();
         }
         let img_name = unsafe { img_name.assume_init() };
@@ -141,5 +141,72 @@ impl Process {
 
     pub fn open_with_flag(&self, flag: u32) -> AppResult<Handle> {
         Handle::new(unsafe { OpenProcess(flag, FALSE, self.id) })
+    }
+}
+
+pub(crate) struct ExecutingProcess<'a> {
+    pub proc: Process,
+    pub ppid: u32,
+    pub threads: u32,
+    _phantom: PhantomData<&'a ()>,
+}
+
+pub(crate) struct ProcessesSnapshot<'a> {
+    snapshot_hdl: HANDLE,
+    current_proc_entry: Option<PROCESSENTRY32W>,
+    _phantom: PhantomData<&'a ()>,
+}
+
+impl<'a> ProcessesSnapshot<'a> {
+    pub fn new(snapshot_hdl: &'a Handle) -> AppResult<Self> {
+        let snapshot_hdl: HANDLE = snapshot_hdl.into();
+        if snapshot_hdl == INVALID_HANDLE_VALUE {
+            return last_error!();
+        }
+
+        Ok(ProcessesSnapshot {
+            snapshot_hdl,
+            current_proc_entry: None,
+            _phantom: PhantomData,
+        })
+    }
+}
+
+impl<'a> Iterator for ProcessesSnapshot<'a> {
+    type Item = ExecutingProcess<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        fn next_executing_process(proc_entry: &PROCESSENTRY32W) -> Option<ExecutingProcess> {
+            if let Ok(proc) = Process::new(proc_entry.th32ProcessID) {
+                return Some(ExecutingProcess {
+                    proc,
+                    ppid: proc_entry.th32ParentProcessID,
+                    threads: proc_entry.cntThreads,
+                    _phantom: PhantomData,
+                });
+            } else {
+                return None;
+            }
+        }
+
+        let mut current_entry = MaybeUninit::uninit();
+
+        if self.current_proc_entry.is_none() {
+            if unsafe { Process32FirstW(self.snapshot_hdl, current_entry.as_mut_ptr()) } != TRUE {
+                return None;
+            }
+
+            let current_entry = unsafe { current_entry.assume_init() };
+            self.current_proc_entry = Some(current_entry);
+            return next_executing_process(&current_entry);
+        }
+
+        if unsafe { Process32NextW(self.snapshot_hdl, current_entry.as_mut_ptr()) } != TRUE {
+            return None;
+        }
+
+        let current_entry = unsafe { current_entry.assume_init() };
+        self.current_proc_entry = Some(current_entry);
+        next_executing_process(&current_entry)
     }
 }

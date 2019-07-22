@@ -1,4 +1,4 @@
-use winapi::um::sysinfoapi::{GetSystemInfo, SYSTEM_INFO};
+use winapi::um::sysinfoapi::GetSystemInfo;
 
 use std::mem::MaybeUninit;
 
