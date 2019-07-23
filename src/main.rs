@@ -1,6 +1,6 @@
+use once_cell::sync::OnceCell;
 use paw;
 use structopt;
-use once_cell::sync::OnceCell;
 
 #[macro_use]
 mod error;
@@ -10,14 +10,18 @@ mod process;
 mod system;
 mod utils;
 
-use process::{ProcessesSnapshot};
+use process::ProcessesSnapshot;
 
 #[derive(structopt::StructOpt)]
 struct Args {
     #[structopt(short = "l", long = "list", help = "show system processes")]
     snapshot: bool,
 
-    #[structopt(short = "p", long = "pid", help = "show memory map of process with PID")]
+    #[structopt(
+        short = "p",
+        long = "pid",
+        help = "show memory map of process with PID"
+    )]
     pid: Option<u32>,
 }
 
@@ -28,11 +32,9 @@ fn main(arg: Args) -> error::AppResult<()> {
     if arg.snapshot {
         let snapshot_hdl = ProcessesSnapshot::snapshot_handle()?;
         let processes = ProcessesSnapshot::new(&snapshot_hdl);
-        for proc in processes {
-
-        }
+        for proc in processes {}
     } else if let Some(pid) = arg.pid {
-        
+
     }
 
     Ok(())
