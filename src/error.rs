@@ -50,6 +50,12 @@ impl fmt::Display for WindowsApiError {
     }
 }
 
+impl fmt::Debug for WindowsApiError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
 #[macro_export]
 macro_rules! last_error {
     () => {
