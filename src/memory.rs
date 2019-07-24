@@ -5,27 +5,38 @@ use std::{
 
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
-use rayon::prelude::*;
+
+use strum_macros::Display;
 
 use crate::{error::AppResult, handle::Handle, process::Process, system::System};
 
 use winapi::um::{
     memoryapi::VirtualQueryEx,
-    winnt::{MEMORY_BASIC_INFORMATION, PROCESS_QUERY_INFORMATION, PROCESS_VM_OPERATION},
+    winnt::{MEMORY_BASIC_INFORMATION, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ},
 };
 
-#[derive(FromPrimitive)]
+#[derive(FromPrimitive, Display)]
 pub(crate) enum MemoryCommitState {
+    #[strum(serialize = "commit")]
     Commit = 0x1000,
+    #[strum(serialize = "free")]
     Free = 0x10000,
+    #[strum(serialize = "reserve")]
     Reserve = 0x2000,
+    #[strum(serialize = "unknown")]
+    Unknown = 0,
 }
 
-#[derive(FromPrimitive)]
+#[derive(FromPrimitive, Display)]
 pub(crate) enum MemoryMappingType {
+    #[strum(serialize = "image")]
     Image = 0x1000000,
+    #[strum(serialize = "mapped")]
     Mapped = 0x40000,
+    #[strum(serialize = "private")]
     Private = 0x20000,
+    #[strum(serialize = "unknown")]
+    Unknown = 0,
 }
 
 pub(crate) struct Region {
@@ -38,19 +49,17 @@ pub(crate) struct Region {
 pub(crate) struct ProcessMemoryMapping<'a> {
     proc_hdl: Handle,
     current_region_base: usize,
-    proc_min_addr: usize,
     proc_max_addr: usize,
     _phantom: PhantomData<&'a ()>,
 }
 
 impl<'a> ProcessMemoryMapping<'a> {
     pub fn new(proc: &'a Process, sys_info: &System) -> AppResult<Self> {
-        let proc_hdl = proc.open_with_flag(PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION)?;
+        let proc_hdl = proc.open_with_flag(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ)?;
 
         Ok(Self {
             proc_hdl,
             current_region_base: sys_info.min_app_addr,
-            proc_min_addr: sys_info.min_app_addr,
             proc_max_addr: sys_info.max_app_addr,
             _phantom: PhantomData,
         })
@@ -80,12 +89,15 @@ impl Iterator for ProcessMemoryMapping<'_> {
 
         let mem_info = unsafe { mem_info.assume_init() };
 
-        self.current_region_base = mem_info.AllocationBase as usize + mem_info.RegionSize;
+        let prev_base = self.current_region_base;
+        self.current_region_base += mem_info.RegionSize;
         Some(Region {
-            base_addr: mem_info.AllocationBase as _,
+            base_addr: prev_base,
             size: mem_info.RegionSize,
-            map_type: FromPrimitive::from_u32(mem_info.Type).unwrap(),
-            com_state: FromPrimitive::from_u32(mem_info.State).unwrap(),
+            map_type: FromPrimitive::from_u32(mem_info.Type)
+                .unwrap_or_else(|| MemoryMappingType::Unknown),
+            com_state: FromPrimitive::from_u32(mem_info.State)
+                .unwrap_or_else(|| MemoryCommitState::Unknown),
         })
     }
 }

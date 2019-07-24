@@ -1,6 +1,7 @@
 use std::{
     marker::PhantomData,
     mem::{self, MaybeUninit},
+    ptr,
 };
 
 use winapi::{
@@ -9,8 +10,8 @@ use winapi::{
         handleapi::INVALID_HANDLE_VALUE,
         processthreadsapi::OpenProcess,
         psapi::{
-            EnumProcessModulesEx, GetModuleFileNameExW, GetModuleInformation,
-            GetProcessImageFileNameW, LIST_MODULES_ALL, MODULEINFO,
+            EnumProcessModulesEx, GetModuleFileNameExW, GetModuleInformation, LIST_MODULES_ALL,
+            MODULEINFO,
         },
         tlhelp32::{
             CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
@@ -21,7 +22,7 @@ use winapi::{
 };
 
 use crate::{
-    error::{AppResult, WindowsApiError},
+    error::{AppError, AppResult},
     handle::Handle,
     utils,
 };
@@ -44,7 +45,12 @@ impl Process {
     fn get_image_file_path(hdl: &Handle) -> AppResult<String> {
         let mut img_name = MaybeUninit::<[u16; MAX_PATH]>::uninit();
         let img_name_len = unsafe {
-            GetProcessImageFileNameW(hdl.into(), img_name.as_mut_ptr() as _, MAX_PATH as _)
+            GetModuleFileNameExW(
+                hdl.into(),
+                ptr::null_mut(),
+                img_name.as_mut_ptr() as _,
+                MAX_PATH as _,
+            )
         };
         if img_name_len == 0 {
             return last_error!();
@@ -146,7 +152,7 @@ impl Process {
 
 pub(crate) struct ExecutingProcess<'a> {
     pub proc: Process,
-    pub ppid: u32,
+    pub pid: u32,
     pub threads: u32,
     _phantom: PhantomData<&'a ()>,
 }
@@ -159,17 +165,17 @@ pub(crate) struct ProcessesSnapshot<'a> {
 
 impl<'a> ProcessesSnapshot<'a> {
     pub fn snapshot_handle() -> AppResult<Handle> {
-        Handle::new(unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) })
+        let hdl = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+        if hdl == INVALID_HANDLE_VALUE {
+            last_error!()
+        } else {
+            Ok(Handle::new(hdl)?)
+        }
     }
 
     pub fn new(snapshot_hdl: &'a Handle) -> AppResult<Self> {
-        let snapshot_hdl: HANDLE = snapshot_hdl.into();
-        if snapshot_hdl == INVALID_HANDLE_VALUE {
-            return last_error!();
-        }
-
         Ok(ProcessesSnapshot {
-            snapshot_hdl,
+            snapshot_hdl: snapshot_hdl.into(),
             current_proc_entry: None,
             _phantom: PhantomData,
         })
@@ -180,38 +186,29 @@ impl<'a> Iterator for ProcessesSnapshot<'a> {
     type Item = ExecutingProcess<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        fn next_executing_process<'a>(
-            proc_entry: &PROCESSENTRY32W,
-        ) -> Option<ExecutingProcess<'a>> {
+        let mut proc_entry = unsafe { MaybeUninit::<PROCESSENTRY32W>::zeroed().assume_init() };
+        proc_entry.dwSize = mem::size_of::<PROCESSENTRY32W>() as u32;
+
+        loop {
+            let has_next = if self.current_proc_entry.is_none() {
+                unsafe { Process32FirstW(self.snapshot_hdl, &mut proc_entry) }
+            } else {
+                unsafe { Process32NextW(self.snapshot_hdl, &mut proc_entry) }
+            };
+
+            if has_next != TRUE {
+                return None;
+            }
+
+            self.current_proc_entry = Some(proc_entry);
+
             if let Ok(proc) = Process::new(proc_entry.th32ProcessID) {
                 return Some(ExecutingProcess {
                     proc,
-                    ppid: proc_entry.th32ParentProcessID,
+                    pid: proc_entry.th32ParentProcessID,
                     threads: proc_entry.cntThreads,
                     _phantom: PhantomData,
                 });
-            } else {
-                return None;
-            }
-        }
-
-        let mut current_entry = MaybeUninit::uninit();
-
-        if self.current_proc_entry.is_none() {
-            if unsafe { Process32FirstW(self.snapshot_hdl, current_entry.as_mut_ptr()) } != TRUE {
-                None
-            } else {
-                let current_entry = unsafe { current_entry.assume_init() };
-                self.current_proc_entry = Some(current_entry);
-                next_executing_process(&current_entry)
-            }
-        } else {
-            if unsafe { Process32NextW(self.snapshot_hdl, current_entry.as_mut_ptr()) } != TRUE {
-                None
-            } else {
-                let current_entry = unsafe { current_entry.assume_init() };
-                self.current_proc_entry = Some(current_entry);
-                next_executing_process(&current_entry)
             }
         }
     }

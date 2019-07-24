@@ -10,9 +10,11 @@ edition = "2018"
 paw = "*"
 structopt = { version = "*", features = ["paw"] }
 once_cell = "*"
-rayon = "*"
 num-traits = "*"
 num-derive = "*"
+tabwriter = "*"
+strum = "*"
+strum_macros = "*"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "*", features = [ "winuser", "libloaderapi", "commctrl", "processthreadsapi", "tlhelp32", "handleapi", "psapi", "errhandlingapi", "winbase", "shellapi", "memoryapi", "wow64apiset", "sysinfoapi", "synchapi", "winerror", "securitybaseapi"]}

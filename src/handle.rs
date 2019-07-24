@@ -2,7 +2,7 @@ use std::convert;
 
 use winapi::um::{handleapi::CloseHandle, winnt::HANDLE};
 
-use crate::error::{AppResult, WindowsApiError};
+use crate::error::{AppError, AppResult};
 
 #[repr(transparent)]
 pub(crate) struct Handle {
@@ -12,7 +12,8 @@ pub(crate) struct Handle {
 impl Handle {
     pub fn new(h: HANDLE) -> AppResult<Self> {
         if h.is_null() {
-            Err(WindowsApiError::last())
+            // Err(WindowsApiError::last())
+            last_error!()
         } else {
             // be careful for INVALID_HANDLE_VALUE which may be valid too
             // see: https://devblogs.microsoft.com/oldnewthing/20040302-00/?p=40443
